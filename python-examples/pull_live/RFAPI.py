@@ -2,11 +2,21 @@
 
 """
 
-import json
-import urllib
-import urllib2
-import httplib
 import sys
+if sys.version_info > (3,0):
+    PY3 = True
+else:
+    PY3 = False
+
+if PY3:
+    import http.client
+    import urllib.request, urllib.parse, urllib.error
+else:
+    import urllib
+    import urllib2
+    import httplib
+
+import json
 import os
 import copy
 
@@ -40,11 +50,23 @@ class RFAPI(object):
         """
         q = copy.deepcopy(q)
         q["token"] = self._token
-        url_q = urllib.urlencode({"q":json.dumps(q)})
+
+        if PY3:
+            url_q = urllib.parse.urlencode({"q":json.dumps(q)})
+        else:
+            url_q = urllib.urlencode({"q": json.dumps(q)})
 
         try:
-            data = urllib2.urlopen(self._url, data=url_q).read()
-        except httplib.IncompleteRead as e:
+        # Uncomment the attributes below and enter proxyhost information to use a proxy server
+        # (N.B. Currently not implemented for Python 3)
+            # proxy = urllib2.ProxyHandler({'http': <proxyhost:port>, 'https':<proxyhost:port>})
+            # opener = urllib2.build_opener(proxy)
+            # urllib2.install_opener(opener)
+            if PY3:
+                data = urllib.request.urlopen(self._url, data=url_q.encode("utf-8")).read()
+            else:
+                data = urllib2.urlopen(self._url, data=url_q).read()
+        except (http.client.IncompleteRead if PY3 else httplib.IncompleteRead) as e:
             sys.stderr.write('Retrying...\nFailed query: {0}\nReturned partial result: {1}\n'.format(q, e.partial))
             if tries_left > 0:
                 return self.query(q, tries_left-1)
@@ -56,7 +78,12 @@ class RFAPI(object):
         if 'output' in q and q['output'].get('format', 'json') == 'csv':
             res = data
         else:
-            res = json.loads(data)
+
+            if PY3:
+                res = json.loads(data.decode('utf-8'))
+            else:
+                res = json.loads(data)
+
             if res.get('status', '') == 'FAILURE':
                 raise Exception("Server failure:\nQuery was '{0}'\nHTTP Status: {1}\tMessage: {2}".format(q, res.get('code','NONE'), res.get('error', 'NONE')))
         return res
@@ -92,6 +119,8 @@ class RFAPI(object):
                 q[key]['page_start'] = res['next_page_start']
             elif 'source' in q:
                 q['source']['page_start'] = res['next_page_start']
+            elif 'cluster' in q:
+                q['cluster']['page_start'] = res['next_page_start']
             elif 'entity' in q:
                 # Special handling for entity queries.
                 if len(res.get('entities', [])) == 0:
@@ -130,6 +159,9 @@ class RFAPI(object):
         """
         if index:
             for i in index.split('.'):
-                data = map(lambda x : x[i], data) if type(data) == type([]) else data[i]
+                if PY3:
+                    data = [x[i] for x in data] if type(data) == type([]) else data[i]
+                else:
+                    data = map(lambda x: x[i], data) if type(data) == type([]) else data[i]
         return data if type(data) == type([]) else [data]
 
